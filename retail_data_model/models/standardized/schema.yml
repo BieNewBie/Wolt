@@ -1,0 +1,173 @@
+version: 2
+
+models:
+  - name: stg_item_logs
+    description: "Standardized item logs with cleaned data types and parsed JSON payload"
+    columns:
+      - name: log_item_id
+        description: "Primary key - unique identifier for the log entry"
+        tests:
+          - unique
+          - not_null
+      - name: item_key
+        description: "Unique identifier of the item"
+        tests:
+          - not_null
+      - name: time_log_created_utc
+        description: "Timestamp when the item was modified"
+        tests:
+          - not_null
+      - name: brand_name
+        description: "Brand name of the product. Note: Some records have NULL brand_name values (see DATA_QUALITY_ISSUES.md)"
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: "IS NOT NULL"
+              config:
+                severity: warn
+                name: "brand_name_missing"
+      - name: item_category
+        description: "Product category (e.g., Crisp & Snacks, Chocolate)"
+        tests:
+          - not_null
+      - name: item_name_en
+        description: "English name of the product"
+        tests:
+          - not_null
+      - name: product_price_incl_vat
+        description: "Price of the product in Euros (including VAT)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+              config:
+                severity: warn
+      - name: product_price_excl_vat
+        description: "Price of the product in Euros (excluding VAT). Calculated as product_price_incl_vat / (1 + vat_rate_percent / 100)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+              config:
+                severity: warn
+      - name: vat_rate_percent
+        description: "VAT rate in percentage points"
+        tests:
+          - not_null
+      - name: currency
+        description: "Currency code"
+      - name: weight_grams
+        description: "Weight of the product in grams"
+      - name: number_of_units
+        description: "Number of units in the package"
+      - name: time_item_created_source_utc
+        description: "Original creation timestamp from source system"
+      - name: load_time
+        description: "When this record was loaded"
+        tests:
+          - not_null
+
+  - name: stg_promos
+    description: "Standardized promotional campaigns with cleaned data types"
+    columns:
+      - name: promo_start_date
+        description: "First date of promotion (inclusive from midnight)"
+        tests:
+          - not_null
+      - name: promo_end_date
+        description: "First date when discount is no longer applied (exclusive)"
+        tests:
+          - not_null
+      - name: item_key
+        description: "Unique identifier of the item on promotion"
+        tests:
+          - not_null
+      - name: promo_type
+        description: "Type of promotion"
+        tests:
+          - not_null
+      - name: discount_percentage
+        description: "Percentage points reduction during promotional period"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0 AND discount_percentage <= 100"
+              config:
+                severity: warn
+      - name: load_time
+        description: "When this record was loaded"
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.expression_is_true:
+          expression: "promo_end_date >= promo_start_date"
+          config:
+            severity: error
+
+  - name: stg_purchase_logs
+    description: "Standardized purchase logs with expanded basket items"
+    columns:
+      - name: purchase_key
+        description: "Unique identifier of the purchase (part of composite key with item_key)"
+        tests:
+          - not_null
+      - name: customer_key
+        description: "Unique identifier of the customer"
+        tests:
+          - not_null
+      - name: time_order_received_utc
+        description: "Timestamp when order and payment received (UTC)"
+        tests:
+          - not_null
+      - name: order_date
+        description: "Date portion of order timestamp (for efficient date-based filtering)"
+        tests:
+          - not_null
+      - name: delivery_distance_meters
+        description: "Straight line distance between store and customer in meters"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: wolt_service_fee
+        description: "Fee for placing order through Wolt App"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: courier_base_fee
+        description: "Base fee courier receives for delivery"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: total_basket_value
+        description: "Total value paid for items including discounts, excluding fees"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: item_key
+        description: "Unique identifier of the item purchased"
+        tests:
+          - not_null
+      - name: item_count
+        description: "Quantity of this item in the purchase"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+              config:
+                severity: error
+      - name: load_time
+        description: "When this record was loaded"
+        tests:
+          - not_null
+

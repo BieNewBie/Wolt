@@ -1,0 +1,429 @@
+version: 2
+
+models:
+  - name: dim_items
+    description: "Item dimension table with SCD Type 2 history - valid_from and valid_to dates"
+    columns:
+      - name: log_item_id
+        description: "Primary key - unique identifier for the log entry"
+        tests:
+          - unique
+          - not_null
+      - name: item_key
+        description: "Unique identifier of the item"
+        tests:
+          - not_null
+      - name: valid_from
+        description: "Start date/time when this version is valid"
+        tests:
+          - not_null
+      - name: valid_to
+        description: "End date/time when this version is valid (9999-12-31 for current)"
+        tests:
+          - not_null
+      - name: is_current
+        description: "Whether this is the current version of the item"
+        tests:
+          - not_null
+      - name: brand_name
+        description: "Brand name of the product"
+      - name: item_category
+        description: "Product category (e.g., Crisp & Snacks, Chocolate)"
+      - name: item_name_en
+        description: "English name of the product"
+      - name: product_price_incl_vat
+        description: "Price of the product in Euros (including VAT)"
+      - name: product_price_excl_vat
+        description: "Price of the product in Euros (excluding VAT). Calculated as product_price_incl_vat / (1 + vat_rate_percent / 100)"
+      - name: vat_rate_percent
+        description: "VAT rate in percentage points"
+      - name: currency
+        description: "Currency code"
+      - name: weight_grams
+        description: "Weight of the product in grams"
+      - name: number_of_units
+        description: "Number of units in the package"
+      - name: time_item_created_source_utc
+        description: "Original creation timestamp from source system"
+      - name: load_time
+        description: "When this record was loaded"
+    tests:
+      - dbt_utils.expression_is_true:
+          expression: "valid_to >= valid_from"
+          config:
+            severity: error
+
+  - name: dim_promotions
+    description: "Promotions dimension with date range logic for joining"
+    columns:
+      - name: promo_start_date
+        description: "First date of promotion (inclusive)"
+        tests:
+          - not_null
+      - name: promo_end_date
+        description: "Original end date from source data (inclusive)"
+        tests:
+          - not_null
+      - name: promo_end_date_exclusive
+        description: "Calculated exclusive end date for date range joins (promo_end_date - 1 day)"
+        tests:
+          - not_null
+      - name: item_key
+        description: "Unique identifier of the item on promotion"
+        tests:
+          - not_null
+      - name: promo_type
+        description: "Type of promotion"
+        tests:
+          - not_null
+      - name: discount_percentage
+        description: "Percentage points reduction during promotional period"
+        tests:
+          - not_null
+      - name: load_time
+        description: "When this record was loaded"
+    tests:
+      - dbt_utils.expression_is_true:
+          expression: "promo_end_date >= promo_start_date"
+          config:
+            severity: error
+
+  - name: dim_customers
+    description: "Customer dimension table with descriptive attributes only - no aggregated metrics"
+    columns:
+      - name: customer_key
+        description: "Primary key - unique identifier of the customer"
+        tests:
+          - unique
+          - not_null
+      - name: first_purchase_date
+        description: "Date of first purchase"
+        tests:
+          - not_null
+      - name: last_purchase_date
+        description: "Date of last purchase"
+        tests:
+          - not_null
+      - name: customer_since_date
+        description: "Date customer first made a purchase"
+        tests:
+          - not_null
+      - name: days_since_first_purchase
+        description: "Days since first purchase (descriptive attribute)"
+        tests:
+          - not_null
+      - name: days_since_last_purchase
+        description: "Days since last purchase (descriptive attribute)"
+        tests:
+          - not_null
+      - name: load_time
+        description: "When this record was loaded"
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.expression_is_true:
+          expression: "last_purchase_date >= first_purchase_date"
+          config:
+            severity: error
+
+  - name: dim_dates
+    description: "Time dimension table for date-based analysis"
+    columns:
+      - name: date
+        description: "Primary key - date"
+        tests:
+          - unique
+          - not_null
+      - name: year
+        description: "Year"
+        tests:
+          - not_null
+      - name: quarter
+        description: "Quarter (1-4)"
+        tests:
+          - not_null
+      - name: month
+        description: "Month (1-12)"
+        tests:
+          - not_null
+      - name: week
+        description: "Week number"
+        tests:
+          - not_null
+      - name: day_of_week
+        description: "Day of week (0=Sunday, 6=Saturday)"
+        tests:
+          - not_null
+      - name: day_of_month
+        description: "Day of month (1-31)"
+        tests:
+          - not_null
+      - name: day_of_year
+        description: "Day of year (1-366)"
+        tests:
+          - not_null
+      - name: is_weekend
+        description: "Whether the date is a weekend"
+        tests:
+          - not_null
+      - name: season
+        description: "Season (Winter, Spring, Summer, Fall)"
+        tests:
+          - not_null
+      - name: month_name
+        description: "Full name of the month"
+      - name: day_name
+        description: "Full name of the day of week"
+      - name: load_time
+        description: "When this record was loaded"
+        tests:
+          - not_null
+
+  - name: fact_purchase_line_items
+    description: "Fact table: Purchase line items - one row per item in each purchase"
+    columns:
+      - name: purchase_key
+        description: "Foreign key to purchase"
+        tests:
+          - not_null
+      - name: customer_key
+        description: "Foreign key to customer dimension"
+        tests:
+          - not_null
+      - name: item_key
+        description: "Foreign key to item dimension"
+        tests:
+          - not_null
+      - name: order_date
+        description: "Foreign key to time dimension (date)"
+        tests:
+          - not_null
+      - name: item_count
+        description: "Quantity of items (measure)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+              config:
+                severity: error
+      - name: unit_price_at_purchase
+        description: "Unit price of item at time of purchase (measure)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+              config:
+                severity: warn
+      - name: line_item_value_before_discount
+        description: "Line item value before discount (measure)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: line_item_value_after_discount
+        description: "Line item value after discount (measure)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: discount_amount
+        description: "Discount amount applied (measure)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: is_on_promotion
+        description: "Whether item was on promotion at purchase time"
+        tests:
+          - not_null
+      - name: delivery_distance_meters
+        description: "Delivery distance in meters (degenerate dimension)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: wolt_service_fee
+        description: "Wolt service fee (degenerate dimension)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: courier_base_fee
+        description: "Courier base fee (degenerate dimension)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: total_basket_value
+        description: "Total basket value (degenerate dimension)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: time_order_received_utc
+        description: "Timestamp when order was received (degenerate dimension)"
+        tests:
+          - not_null
+      - name: load_time
+        description: "When this record was loaded"
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - purchase_key
+            - item_key
+          config:
+            severity: error
+
+  - name: fact_purchases
+    description: "Fact table: Purchases - one row per purchase"
+    columns:
+      - name: purchase_key
+        description: "Primary key - unique identifier of the purchase"
+        tests:
+          - unique
+          - not_null
+      - name: customer_key
+        description: "Foreign key to customer dimension"
+        tests:
+          - not_null
+      - name: order_date
+        description: "Foreign key to time dimension (date)"
+        tests:
+          - not_null
+      - name: total_basket_value
+        description: "Total basket value (measure)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: total_basket_value_before_discounts
+        description: "Total basket value before discounts (calculated measure - sum of line_item_value_before_discount)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: total_items
+        description: "Total number of items (measure)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+              config:
+                severity: error
+      - name: unique_items
+        description: "Number of unique items in purchase (measure)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+              config:
+                severity: error
+      - name: items_on_promotion_count
+        description: "Count of items on promotion (measure)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: promotion_discount_amount
+        description: "Total promotion discount amount (measure)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: wolt_service_fee
+        description: "Wolt service fee (measure)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: courier_base_fee
+        description: "Courier base fee (measure)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: total_order_value
+        description: "Total order value including fees (measure)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: avg_item_price
+        description: "Average item price (calculated measure)"
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: total_fees
+        description: "Total fees (calculated measure)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: fees_as_percent_of_basket
+        description: "Fees as percentage of basket (calculated measure)"
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: has_promotion_items
+        description: "Whether purchase contains items on promotion"
+        tests:
+          - not_null
+      - name: delivery_distance_meters
+        description: "Delivery distance in meters (degenerate dimension)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: time_order_received_utc
+        description: "Timestamp when order was received (degenerate dimension)"
+        tests:
+          - not_null
+      - name: load_time
+        description: "When this record was loaded"
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.expression_is_true:
+          expression: "total_items >= unique_items"
+          config:
+            severity: error
+            name: "total_items_gte_unique_items"
+

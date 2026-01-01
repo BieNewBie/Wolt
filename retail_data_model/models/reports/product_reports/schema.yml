@@ -1,0 +1,373 @@
+version: 2
+
+models:
+  - name: mart_product_baskets
+    description: |
+      Product Baskets Mart - Purchase-level with item combination details.
+      Grain: One row per purchase with item lists and combination details.
+      
+      This mart enables analysts to answer product combination questions:
+      - Do products get bought together? (use item_keys_list to analyze item combinations)
+      - Basket composition analysis? (use item_names_list, categories_list, basket_size)
+      - Category diversity? (use basket_category_diversity, unique_categories_in_basket)
+      - Product recommendations? (find baskets containing a product, extract other items, count co-occurrences)
+    columns:
+      - name: purchase_key
+        description: "Primary key - unique purchase identifier"
+        tests:
+          - unique
+          - not_null
+      - name: customer_key
+        description: "Foreign key to customer dimension"
+        tests:
+          - not_null
+      - name: order_date
+        description: "Date of the order"
+        tests:
+          - not_null
+      - name: year
+        description: "Year of the order"
+        tests:
+          - not_null
+      - name: quarter
+        description: "Quarter (1-4)"
+        tests:
+          - not_null
+      - name: month
+        description: "Month (1-12)"
+        tests:
+          - not_null
+      - name: season
+        description: "Season (Winter, Spring, Summer, Fall)"
+        tests:
+          - not_null
+      - name: is_weekend
+        description: "Whether the order date is a weekend"
+        tests:
+          - not_null
+      - name: first_purchase_date
+        description: "Customer's first purchase date"
+        tests:
+          - not_null
+      - name: is_repeat_purchase
+        description: "Whether this is a repeat purchase for the customer"
+        tests:
+          - not_null
+      - name: item_names_list
+        description: "Pipe-separated list of item names in the basket (format: 'Item1 | Item2 | Item3'). Use for human-readable basket inspection and exact basket matching."
+      - name: item_keys_list
+        description: "Comma-separated list of item keys in the basket (format: '1,2,3'). Use for programmatic basket analysis, exact basket matching, and creating item pairs for co-occurrence analysis."
+      - name: categories_list
+        description: "Pipe-separated list of categories in the basket (alphabetically sorted, format: 'Category1 | Category2 | Category3'). Use for category diversity analysis and cross-category purchase patterns."
+      - name: unique_categories_in_basket
+        description: "Number of unique categories in the basket"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+              config:
+                severity: warn
+      - name: basket_size
+        description: "Basket size category (Single Item, Two Items, Small Basket (3-5 items), Medium Basket (6-10 items), Large Basket (11+ items))"
+        tests:
+          - not_null
+      - name: basket_category_diversity
+        description: "Basket category diversity (Single Category, Two Categories, Multi-Category (3+ categories))"
+        tests:
+          - not_null
+      - name: total_basket_value
+        description: "Total basket value for the purchase (excluding fees)"
+        tests:
+          - not_null
+      - name: total_order_value
+        description: "Total order value (basket value + fees)"
+        tests:
+          - not_null
+      - name: total_items
+        description: "Total items in the purchase (sum of all item quantities)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+              config:
+                severity: warn
+      - name: unique_items
+        description: "Number of unique items in the purchase (distinct item_key count)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+              config:
+                severity: warn
+      - name: items_on_promotion_count
+        description: "Number of items on promotion in this purchase (from fact_purchases)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: promotion_discount_amount
+        description: "Total promotion discount amount for this purchase (from fact_purchases)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: has_promotion_items
+        description: "Whether this purchase has items on promotion (from fact_purchases)"
+        tests:
+          - not_null
+      - name: line_items_on_promotion
+        description: "Count of line items that were on promotion"
+      - name: avg_item_quantity_per_line_item
+        description: "Average item quantity per line item in the basket"
+      - name: max_item_quantity_in_basket
+        description: "Maximum item quantity of any single item in the basket"
+      - name: delivery_distance_meters
+        description: "Delivery distance in meters"
+        tests:
+          - not_null
+      - name: delivery_distance_category
+        description: "Delivery distance category (Very Close, Close, Medium, Far) - calculated using delivery_distance_category macro"
+        tests:
+          - not_null
+      - name: wolt_service_fee
+        description: "Wolt service fee for this purchase"
+        tests:
+          - not_null
+      - name: courier_base_fee
+        description: "Courier base fee for this purchase"
+        tests:
+          - not_null
+      - name: total_fees
+        description: "Total fees (wolt_service_fee + courier_base_fee)"
+        tests:
+          - not_null
+      - name: time_order_received_utc
+        description: "Timestamp when order was received (UTC)"
+        tests:
+          - not_null
+      - name: load_time
+        description: "When this record was loaded"
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.expression_is_true:
+          expression: "unique_items <= total_items"
+          config:
+            severity: warn
+
+  - name: mart_category_product_performance
+    description: |
+      Category Product Performance Mart - Pre-aggregated category and product performance metrics.
+      Grain: One row per category + product + time period (month).
+      
+      This mart enables analysts to answer category/product performance questions with minimal SQL:
+      - Which categories performing better? (group by item_category, sum revenue, analyze growth_trend)
+      - What are the star products? (filter performance_category = 'Star Product', order by revenue_till_date)
+      - What's going on with underperforming products? (filter growth_trend = 'Decline vs Category', analyze trends)
+      - Which products are accelerating ahead of their category? (filter growth_trend = 'Accelerating')
+      - How do users consume each category in different periods? (group by item_category, year, month)
+    columns:
+      - name: item_category
+        description: "Product category"
+        tests:
+          - not_null
+      - name: item_key
+        description: "Product identifier"
+        tests:
+          - not_null
+      - name: item_name_en
+        description: "Product name in English"
+      - name: brand_name
+        description: "Brand name of the item"
+      - name: year
+        description: "Year"
+        tests:
+          - not_null
+      - name: quarter
+        description: "Quarter (1-4)"
+        tests:
+          - not_null
+      - name: month
+        description: "Month (1-12)"
+        tests:
+          - not_null
+      - name: month_name
+        description: "Full name of the month"
+      - name: season
+        description: "Season (Winter, Spring, Summer, Fall)"
+        tests:
+          - not_null
+      - name: revenue
+        description: "Revenue for this category+product+month"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: revenue_before_discount
+        description: "Revenue before discount"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: total_discount_amount
+        description: "Total discount amount"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: discount_percentage
+        description: "Discount percentage"
+      - name: quantity_sold
+        description: "Quantity sold this month"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: purchase_count
+        description: "Number of purchases this month"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: customer_count
+        description: "Number of unique customers who purchased this month"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: avg_quantity_per_purchase
+        description: "Average quantity per purchase"
+      - name: revenue_per_unit
+        description: "Revenue per unit sold"
+      - name: revenue_per_customer
+        description: "Revenue per customer"
+      - name: quantity_on_promotion
+        description: "Quantity sold on promotion"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: revenue_on_promotion
+        description: "Revenue from items on promotion"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: purchases_with_promotion
+        description: "Number of purchases with promotions"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: promotion_quantity_percentage
+        description: "Percentage of quantity sold on promotion"
+      - name: promotion_revenue_percentage
+        description: "Percentage of revenue from promotions"
+      - name: promotion_purchase_percentage
+        description: "Percentage of purchases with promotions"
+      - name: avg_price
+        description: "Average price at purchase"
+      - name: min_price
+        description: "Minimum price at purchase"
+      - name: max_price
+        description: "Maximum price at purchase"
+      - name: avg_base_price
+        description: "Average base price"
+      - name: revenue_previous_month
+        description: "Revenue in previous month"
+      - name: quantity_previous_month
+        description: "Quantity sold in previous month"
+      - name: customer_count_previous_month
+        description: "Customer count in previous month"
+      - name: revenue_growth_mom_pct
+        description: "Month-over-month revenue growth percentage"
+      - name: quantity_growth_mom_pct
+        description: "Month-over-month quantity growth percentage"
+      - name: customer_growth_mom_pct
+        description: "Month-over-month customer growth percentage"
+      - name: revenue_till_date
+        description: "Total revenue till date (running total)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: quantity_till_date
+        description: "Total quantity sold till date (running total)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: customer_count_till_date
+        description: "Total customer count till date (running total)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: avg_monthly_revenue_till_date
+        description: "Average monthly revenue till date"
+      - name: avg_monthly_quantity_till_date
+        description: "Average monthly quantity till date"
+      - name: category_total_growth_pct
+        description: "Category total growth percentage (weighted average - growth of total category revenue). Reflects actual money movement in the category, not skewed by small products with high growth percentages. NULL when category has no previous month data."
+      - name: market_share_pct
+        description: "Product's market share percentage within its category for that month (product revenue / total category revenue * 100)"
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: "between 0 and 100"
+              config:
+                severity: warn
+      - name: revenue_percentile
+        description: "Product's revenue percentile ranking within its category for that month (0.0 = lowest, 1.0 = highest). Used for marketplace-based performance classification."
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: "between 0 and 1"
+              config:
+                severity: warn
+      - name: growth_trend
+        description: "Relative growth momentum compared to category (marketplace-based). Values: 'New' (first month), 'Accelerating' (>15% faster than category), 'Outperforming' (beating category average), 'On Track' (within 15% of category), 'Decline vs Category' (significantly losing share). NULL when category has no previous month data. This tells you 'what's happening right now' vs performance_category which tells you 'what the product is'."
+      - name: performance_category
+        description: "Marketplace-based performance category: 'New' (first month, no comparison possible), Star Product (top 10% revenue AND growing faster than category), Anchor (Cash Cow) (top 10% revenue but growing at/below category average), Rising Trend (bottom 50% revenue but growing 2x+ category speed with min 10 purchases), Underperformer (everything else). NULL when category has no previous month data."
+      - name: load_time
+        description: "When this record was loaded"
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - item_category
+            - item_key
+            - year
+            - month
+      - dbt_utils.expression_is_true:
+          expression: "revenue_till_date >= revenue"
+          config:
+            severity: warn
+

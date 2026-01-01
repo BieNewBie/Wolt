@@ -1,0 +1,61 @@
+version: 2
+
+sources:
+  - name: landing
+    description: "Landing layer tables from seeded CSV files (Bronze Layer)"
+    schema: landing
+    tables:
+      - name: snack_store_item_logs
+        description: "Item catalog with change history - one row per change"
+        columns:
+          - name: LOG_ITEM_ID
+            description: "Primary key of the log. Unique per ITEM_KEY + TIME_LOG_CREATED_UTC"
+            tests:
+              - unique:
+                  config:
+                    severity: warn
+          - name: ITEM_KEY
+            description: "Unique ID of the items, identifying each product"
+          - name: TIME_LOG_CREATED_UTC
+            description: "Timestamp of when the item was modified"
+          - name: PAYLOAD
+            description: "JSON payload with all item fields (brand, category, price, name, etc.)"
+            
+      - name: snack_store_promos
+        description: "Promotional campaigns and discounts for items"
+        columns:
+          - name: PROMO_START_DATE
+            description: "First date of promotion (inclusive from midnight)"
+          - name: PROMO_END_DATE
+            description: "First date when discount is no longer applied (exclusive - no hours of this date included)"
+          - name: ITEM_KEY
+            description: "Unique ID of the item on promotion"
+          - name: PROMO_TYPE
+            description: "Type of promotion"
+          - name: DISCOUNT_IN_PERCENTAGE
+            description: "Percentage points reduction during promotional period"
+            
+      - name: snack_store_purchase_logs
+        description: "Completed and delivered purchases from 2023 in Berlin Wolt Snack Store"
+        columns:
+          - name: TIME_ORDER_RECEIVED_UTC
+            description: "Timestamp when order and payment received from customer (UTC)"
+          - name: PURCHASE_KEY
+            description: "Primary key - unique identification of the purchase"
+            tests:
+              - unique:
+                  config:
+                    severity: warn
+          - name: CUSTOMER_KEY
+            description: "Unique identification of customer account"
+          - name: DELIVERY_DISTANCE_LINE_METERS
+            description: "Straight line distance between store and customer"
+          - name: WOLT_SERVICE_FEE
+            description: "Fee for placing order through Wolt App"
+          - name: COURIER_BASE_FEE
+            description: "Fee courier receives for delivery (excluding tips)"
+          - name: TOTAL_BASKET_VALUE
+            description: "Total value paid for items including discounts, excluding fees"
+          - name: ITEM_BASKET_DESCRIPTION
+            description: "JSON array showing which and how many items were bought"
+

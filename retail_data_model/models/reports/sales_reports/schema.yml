@@ -1,0 +1,210 @@
+version: 2
+
+models:
+  - name: mart_sales_summary
+    description: |
+      Sales Summary Mart - Pre-joined fact and dimension tables for easy analytics.
+      Grain: One row per purchase line item with all dimensions pre-joined.
+      
+      This mart enables analysts to answer business questions with minimal SQL:
+      - What items are being bought and what price? (filter by item_category, order_date)
+      - How many items on promotion? (filter by is_on_promotion, group by period)
+      - What area is the store serving? (group by delivery_distance_category)
+      - How do fees compare to basket value? (use fees_as_percent_of_basket)
+      - Revenue by period? (sum line_item_value_after_discount, group by date attributes)
+      - Category performance? (group by item_category, sum revenue metrics)
+    columns:
+      - name: purchase_key
+        description: "Primary key - unique purchase identifier"
+        tests:
+          - not_null
+      - name: customer_key
+        description: "Foreign key to customer dimension"
+        tests:
+          - not_null
+      - name: item_key
+        description: "Foreign key to item dimension"
+        tests:
+          - not_null
+      - name: order_date
+        description: "Date of the order"
+        tests:
+          - not_null
+      - name: year
+        description: "Year of the order"
+        tests:
+          - not_null
+      - name: quarter
+        description: "Quarter (1-4)"
+        tests:
+          - not_null
+      - name: month
+        description: "Month (1-12)"
+        tests:
+          - not_null
+      - name: week
+        description: "Week number"
+        tests:
+          - not_null
+      - name: day_of_week
+        description: "Day of week (0=Sunday, 6=Saturday)"
+        tests:
+          - not_null
+      - name: day_of_month
+        description: "Day of month (1-31)"
+        tests:
+          - not_null
+      - name: day_of_year
+        description: "Day of year (1-366)"
+        tests:
+          - not_null
+      - name: is_weekend
+        description: "Whether the order date is a weekend"
+        tests:
+          - not_null
+      - name: season
+        description: "Season (Winter, Spring, Summer, Fall)"
+        tests:
+          - not_null
+      - name: month_name
+        description: "Full name of the month"
+      - name: day_name
+        description: "Full name of the day of week"
+      - name: item_name_en
+        description: "Item name in English"
+      - name: item_category
+        description: "Product category"
+      - name: brand_name
+        description: "Brand name of the item"
+      - name: product_price_incl_vat
+        description: "Product price including VAT"
+        tests:
+          - not_null
+      - name: product_price_excl_vat
+        description: "Product price excluding VAT"
+        tests:
+          - not_null
+      - name: vat_rate_percent
+        description: "VAT rate percentage"
+        tests:
+          - not_null
+      - name: currency
+        description: "Currency code"
+      - name: weight_grams
+        description: "Weight of the item in grams"
+      - name: item_is_current
+        description: "Whether this is the current version of the item (SCD Type 2)"
+        tests:
+          - not_null
+      - name: first_purchase_date
+        description: "Customer's first purchase date"
+        tests:
+          - not_null
+      - name: last_purchase_date
+        description: "Customer's last purchase date"
+        tests:
+          - not_null
+      - name: customer_since_date
+        description: "Date customer first made a purchase"
+        tests:
+          - not_null
+      - name: days_since_first_purchase
+        description: "Days since customer's first purchase"
+        tests:
+          - not_null
+      - name: days_since_last_purchase
+        description: "Days since customer's last purchase"
+        tests:
+          - not_null
+      - name: is_first_purchase
+        description: "Whether this is the customer's first purchase"
+        tests:
+          - not_null
+      - name: is_on_promotion
+        description: "Whether this line item was on promotion"
+        tests:
+          - not_null
+      - name: promo_type
+        description: "Type of promotion applied"
+      - name: promo_discount_percentage
+        description: "Discount percentage of the promotion"
+      - name: promo_start_date
+        description: "Promotion start date"
+      - name: promo_end_date
+        description: "Promotion end date"
+      - name: item_count
+        description: "Number of items in this line item"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+              config:
+                severity: warn
+      - name: unit_price_at_purchase
+        description: "Unit price at time of purchase"
+        tests:
+          - not_null
+      - name: line_item_value_before_discount
+        description: "Line item value before discount"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: line_item_value_after_discount
+        description: "Line item value after discount (including VAT)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: discount_amount
+        description: "Discount amount applied to this line item"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: delivery_distance_meters
+        description: "Delivery distance in meters"
+        tests:
+          - not_null
+      - name: delivery_distance_category
+        description: "Delivery distance category (Very Close, Close, Medium, Far)"
+        tests:
+          - not_null
+      - name: wolt_service_fee
+        description: "Wolt service fee for this purchase"
+        tests:
+          - not_null
+      - name: courier_base_fee
+        description: "Courier base fee for this purchase"
+        tests:
+          - not_null
+      - name: total_basket_value
+        description: "Total basket value for the purchase"
+        tests:
+          - not_null
+      - name: time_order_received_utc
+        description: "Timestamp when order was received (UTC)"
+        tests:
+          - not_null
+      - name: total_fees
+        description: "Total fees (wolt_service_fee + courier_base_fee)"
+        tests:
+          - not_null
+      - name: fees_as_percent_of_basket
+        description: "Fees as percentage of basket value"
+      - name: load_time
+        description: "When this record was loaded"
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - purchase_key
+            - item_key
+

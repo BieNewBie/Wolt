@@ -1,0 +1,633 @@
+version: 2
+
+models:
+  - name: mart_customer_monthly_metrics
+    description: |
+      Customer Monthly Metrics (Base Table) - Monthly metrics only, no running totals.
+      Grain: One row per customer per month with monthly aggregated metrics.
+      
+      Important: This model only includes months where customers made purchases. If a customer
+      doesn't purchase in a month, they won't have a row for that month.
+      
+      This is a base table used by mart_customer_monthly_summary which adds running totals
+      and customer segments.
+    columns:
+      - name: customer_key
+        description: "Foreign key to customer dimension"
+        tests:
+          - not_null
+      - name: year
+        description: "Year"
+        tests:
+          - not_null
+      - name: month
+        description: "Month number"
+        tests:
+          - not_null
+      - name: quarter
+        description: "Quarter (1-4)"
+        tests:
+          - not_null
+      - name: month_start_date
+        description: "Start date of the analysis month"
+        tests:
+          - not_null
+      - name: month_end_date
+        description: "End date of the analysis month"
+        tests:
+          - not_null
+      - name: cohort_year
+        description: "Year of customer's first purchase"
+        tests:
+          - not_null
+      - name: cohort_month
+        description: "Month of customer's first purchase"
+        tests:
+          - not_null
+      - name: cohort_month_label
+        description: "Cohort month in YYYY-MM format (first purchase month)"
+        tests:
+          - not_null
+      - name: first_purchase_date
+        description: "Date of customer's first purchase"
+        tests:
+          - not_null
+      - name: months_since_first_purchase
+        description: "Number of months since first purchase"
+        tests:
+          - not_null
+      - name: purchases_this_month
+        description: "Number of purchases made this month"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: revenue_this_month
+        description: "Revenue generated this month"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: basket_value_this_month
+        description: "Basket value (excluding fees) this month"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: items_purchased_this_month
+        description: "Total items purchased this month"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: items_on_promotion_this_month
+        description: "Count of items on promotion this month"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: promotion_discount_this_month
+        description: "Total promotion discount amount this month"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: purchases_with_promotions_this_month
+        description: "Number of purchases with promotions this month"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: wolt_service_fees_this_month
+        description: "Wolt service fees this month"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: courier_fees_this_month
+        description: "Courier fees this month"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: avg_order_value_this_month
+        description: "Average order value this month"
+        tests:
+          - not_null
+      - name: avg_basket_value_this_month
+        description: "Average basket value this month"
+        tests:
+          - not_null
+      - name: is_first_month
+        description: "Whether this is the customer's first month"
+        tests:
+          - not_null
+      - name: all_items_on_promotion_first_month
+        description: "Whether all items in first month were on promotion"
+        tests:
+          - not_null
+      - name: has_promotion_items_first_month
+        description: "Whether any items in first month were on promotion"
+        tests:
+          - not_null
+      - name: promotion_only_purchase_first_month
+        description: "Whether first-time customer only bought items on promotion in first month"
+        tests:
+          - not_null
+      - name: promotion_usage_percentage_first_month
+        description: "Promotion usage percentage in first month (NULL for months after first month)"
+      - name: load_time
+        description: "When this record was loaded"
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - customer_key
+            - year
+            - month
+      - dbt_utils.expression_is_true:
+          expression: "month_start_date <= month_end_date"
+          config:
+            severity: error
+
+  - name: mart_customer_monthly_summary
+    description: |
+      Customer Monthly Summary Mart - Customer behavior over time with monthly granularity, running totals, and segments.
+      Grain: One row per customer per month with monthly metrics, running totals, and customer segments.
+      
+      Important: This model only includes months where customers made purchases. If a customer
+      doesn't purchase in a month, they won't have a row for that month. This means retention
+      analysis should compare active customers in each month to the original cohort size.
+      
+      This mart is built from mart_customer_monthly_metrics and adds:
+      - Running totals (total_*_till_date columns)
+      - Calculated percentages from running totals
+      - Customer segment at end of month (based on total purchases till date)
+      
+      This mart enables analysts to answer customer behavior over time and retention questions:
+      - Retention analysis: "January cohort active in February/March/etc." (compare active customers
+        in each month to original cohort size)
+      - First-time customer + promotions: Filter is_first_month = true, check promotion flags
+      - Customer engagement trends: Month-over-month analysis
+      - Customer behavior over time: Track engagement patterns
+      - Customer segmentation: Use customer_segment_at_end_of_month to analyze customer evolution
+    columns:
+      - name: customer_key
+        description: "Foreign key to customer dimension"
+        tests:
+          - not_null
+      - name: year
+        description: "Year"
+        tests:
+          - not_null
+      - name: month
+        description: "Month number"
+        tests:
+          - not_null
+      - name: quarter
+        description: "Quarter (1-4)"
+        tests:
+          - not_null
+      - name: month_start_date
+        description: "Start date of the analysis month"
+        tests:
+          - not_null
+      - name: month_end_date
+        description: "End date of the analysis month"
+        tests:
+          - not_null
+      - name: cohort_year
+        description: "Year of customer's first purchase"
+        tests:
+          - not_null
+      - name: cohort_month
+        description: "Month of customer's first purchase"
+        tests:
+          - not_null
+      - name: cohort_month_label
+        description: "Cohort month in YYYY-MM format (first purchase month)"
+        tests:
+          - not_null
+      - name: first_purchase_date
+        description: "Date of customer's first purchase"
+        tests:
+          - not_null
+      - name: months_since_first_purchase
+        description: "Number of months since first purchase"
+        tests:
+          - not_null
+      - name: purchases_this_month
+        description: "Number of purchases made this month"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: revenue_this_month
+        description: "Revenue generated this month"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: basket_value_this_month
+        description: "Basket value (excluding fees) this month"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: items_purchased_this_month
+        description: "Total items purchased this month"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: items_on_promotion_this_month
+        description: "Count of items on promotion this month"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: promotion_discount_this_month
+        description: "Total promotion discount amount this month"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: purchases_with_promotions_this_month
+        description: "Number of purchases with promotions this month"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: wolt_service_fees_this_month
+        description: "Wolt service fees this month"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: courier_fees_this_month
+        description: "Courier fees this month"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: avg_order_value_this_month
+        description: "Average order value this month"
+        tests:
+          - not_null
+      - name: avg_basket_value_this_month
+        description: "Average basket value this month"
+        tests:
+          - not_null
+      - name: is_first_month
+        description: "Whether this is the customer's first month"
+        tests:
+          - not_null
+      - name: all_items_on_promotion_first_month
+        description: "Whether all items in first month were on promotion"
+        tests:
+          - not_null
+      - name: has_promotion_items_first_month
+        description: "Whether any items in first month were on promotion"
+        tests:
+          - not_null
+      - name: promotion_only_purchase_first_month
+        description: "Whether first-time customer only bought items on promotion in first month"
+        tests:
+          - not_null
+      - name: promotion_usage_percentage_first_month
+        description: "Promotion usage percentage in first month (NULL for months after first month)"
+      - name: total_purchases_till_date
+        description: "Total purchases till date (running total)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: total_revenue_till_date
+        description: "Total revenue till date (running total)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: total_basket_value_till_date
+        description: "Total basket value till date (running total)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: total_items_till_date
+        description: "Total items purchased till date (running total)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: total_items_on_promotion_till_date
+        description: "Total items on promotion till date (running total)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: total_promotion_discount_till_date
+        description: "Total promotion discount till date (running total)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: total_purchases_with_promotions_till_date
+        description: "Total purchases with promotions till date (running total)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: total_wolt_service_fees_till_date
+        description: "Total Wolt service fees till date (running total)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: total_courier_fees_till_date
+        description: "Total courier fees till date (running total)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: promotion_usage_percentage_till_date
+        description: "Percentage of purchases with promotions till date"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "between 0 and 100"
+              config:
+                severity: warn
+      - name: items_on_promotion_percentage_till_date
+        description: "Percentage of items on promotion till date"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "between 0 and 100"
+              config:
+                severity: warn
+      - name: discount_savings_percentage_till_date
+        description: "Discount savings as percentage of basket value till date"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "between 0 and 100"
+              config:
+                severity: warn
+      - name: customer_segment_at_end_of_month
+        description: "Customer segment at month end based on total purchases till date (quartile-based thresholds: No Purchases (0), One-Time (1), Occasional (2-25), Regular (26-40), Frequent (41-63), Very Frequent (64+))"
+        tests:
+          - not_null
+      - name: load_time
+        description: "When this record was loaded"
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - customer_key
+            - year
+            - month
+      - dbt_utils.expression_is_true:
+          expression: "month_start_date <= month_end_date"
+          config:
+            severity: error
+      - dbt_utils.expression_is_true:
+          expression: "total_purchases_till_date >= purchases_this_month"
+          config:
+            severity: warn
+
+  - name: mart_customer_summary
+    description: |
+      Customer Summary Mart - Customer-level aggregated metrics.
+      Grain: One row per customer with aggregated purchase metrics across their entire lifetime.
+      
+      This mart enables analysts to answer customer behavior questions:
+      - What's the customer recency pattern? (use days_since_last_purchase to categorize active/recent/inactive)
+      - Frequency-based segmentation: One-Time, Occasional (2-25), Regular (26-40), Frequent (41-63), Very Frequent (64+)
+      - Value-based segmentation: No Revenue, Low (€0.01-190), Medium (€191-310), High (€311-490), Very High (€491+)
+      - Top customers by revenue? (order by total_revenue desc, filter by customer_value_segment)
+      - Do customers with higher promo usage have higher value? (group by promotion_usage_percentage ranges, analyze total_revenue)
+    columns:
+      - name: customer_key
+        description: "Primary key - unique customer identifier"
+        tests:
+          - unique
+          - not_null
+      - name: days_since_first_purchase
+        description: "Days since first purchase"
+        tests:
+          - not_null
+      - name: days_since_last_purchase
+        description: "Days since last purchase"
+        tests:
+          - not_null
+      - name: total_purchases
+        description: "Total number of purchases made by customer"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: first_purchase_date
+        description: "Date of customer's first purchase"
+        tests:
+          - not_null
+      - name: last_purchase_date
+        description: "Date of customer's last purchase"
+        tests:
+          - not_null
+      - name: customer_lifetime_days
+        description: "Customer lifetime in days"
+        tests:
+          - not_null
+      - name: customer_segment
+        description: "Customer segment based on purchase frequency (quartile-based thresholds: 1 purchase, 2-25 (P25), 26-40 (P50), 41-63 (P75), 64+ (above P75))"
+        tests:
+          - not_null
+      - name: customer_value_segment
+        description: "Customer value segment based on total revenue (quartile-based thresholds: €0, €0.01-190 (P25), €191-310 (P50), €311-490 (P75), €491+ (above P75))"
+        tests:
+          - not_null
+      - name: total_revenue
+        description: "Total revenue from customer (total_order_value across all purchases)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: total_basket_value
+        description: "Total basket value across all purchases"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: total_wolt_service_fees
+        description: "Total Wolt service fees across all purchases"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: total_courier_fees
+        description: "Total courier fees across all purchases"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: total_fees
+        description: "Total fees (wolt + courier) across all purchases - sourced from fact_purchases where it's calculated as wolt_service_fee + courier_base_fee"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: avg_order_value
+        description: "Average order value for the customer"
+        tests:
+          - not_null
+      - name: avg_basket_value
+        description: "Average basket value for the customer"
+        tests:
+          - not_null
+      - name: total_items_purchased
+        description: "Total items purchased across all purchases"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: avg_items_per_order
+        description: "Average items per order"
+        tests:
+          - not_null
+      - name: total_items_on_promotion
+        description: "Total items on promotion across all purchases"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: total_promotion_discounts
+        description: "Total promotion discount amount across all purchases"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: purchases_with_promotions
+        description: "Number of purchases that included promotions"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+              config:
+                severity: warn
+      - name: promotion_usage_percentage
+        description: "Percentage of purchases that included promotions"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "between 0 and 100"
+              config:
+                severity: warn
+      - name: items_on_promotion_percentage
+        description: "Percentage of items purchased that were on promotion"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "between 0 and 100"
+              config:
+                severity: warn
+      - name: discount_savings_percentage
+        description: "Discount savings as percentage of basket value"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "between 0 and 100"
+              config:
+                severity: warn
+      - name: avg_fees_as_percent_of_basket
+        description: "Average fees as percentage of basket value"
+        tests:
+          - not_null
+      - name: load_time
+        description: "When this record was loaded"
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.expression_is_true:
+          expression: "total_purchases >= 0"
+          config:
+            severity: error
+      - dbt_utils.expression_is_true:
+          expression: "first_purchase_date <= last_purchase_date"
+          config:
+            severity: error
+

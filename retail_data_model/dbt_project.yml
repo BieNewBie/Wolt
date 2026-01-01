@@ -1,0 +1,173 @@
+
+# Name your project! Project names should contain only lowercase characters
+# and underscores. A good package name should reflect your organization's
+# name or the intended use of these models
+name: 'retail_data_model'
+version: '1.0.0'
+
+# This setting configures which "profile" dbt uses for this project.
+profile: 'retail_data_model'
+
+# These configurations specify where dbt should look for different types of files.
+# The `model-paths` config, for example, states that models in this project can be
+# found in the "models/" directory. You probably won't need to change these!
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:         # directories to be removed by `dbt clean`
+  - "target"
+  - "dbt_packages"
+
+
+# Configuring models
+# Full documentation: https://docs.getdbt.com/docs/configuring-models
+
+# Model configurations can be added here or in individual model files
+# using the `{{ config(...) }}` macro.
+models:
+  retail_data_model:
+    # Standardized Layer (Silver) - cleaned and standardized data
+    standardized:
+      +schema: standardized
+      
+      # High-volume purchase logs - incremental for scalability
+      stg_purchase_logs:
+        +post-hook: |
+          ANALYZE {{ this }};
+          CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_purchase_item ON {{ this }} (purchase_key, item_key);
+          CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_customer ON {{ this }} (customer_key);
+          CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_time_order ON {{ this }} (time_order_received_utc);
+          CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_order_date ON {{ this }} (order_date);
+      
+      # Item logs - incremental for frequent updates
+      stg_item_logs:
+        +post-hook: |
+          ANALYZE {{ this }};
+          CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_log_item_id ON {{ this }} (log_item_id);
+          CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_item_key ON {{ this }} (item_key);
+          CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_time_log ON {{ this }} (time_log_created_utc);
+      
+      # Promos - table (small reference data)
+      stg_promos:
+        +post-hook: |
+          ANALYZE {{ this }};
+          CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_item_key ON {{ this }} (item_key);
+          CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_date_range ON {{ this }} (promo_start_date, promo_end_date);
+    
+    # Enriched Layer (Gold) - business logic, dimensions, and facts
+    # All enriched models including dimensions and facts
+    enriched:
+      +materialized: table
+      
+      # Dimensions subfolder
+      dim:
+        +schema: dimensions
+        
+        # Dimension: Items (SCD Type 2)
+        dim_items:
+          +post-hook: |
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_log_item_id ON {{ this }} (log_item_id);
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_item_key ON {{ this }} (item_key);
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_valid_dates ON {{ this }} (valid_from, valid_to);
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_is_current ON {{ this }} (is_current);
+        
+        # Dimension: Promotions
+        dim_promotions:
+          +post-hook: |
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_item_key ON {{ this }} (item_key);
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_date_range ON {{ this }} (promo_start_date, promo_end_date_exclusive);
+        
+        # Dimension: Customers
+        dim_customers:
+          +post-hook: |
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_customer_key ON {{ this }} (customer_key);
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_first_purchase ON {{ this }} (first_purchase_date);
+        
+        # Dimension: Date
+        dim_dates:
+          +post-hook: |
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_date ON {{ this }} (date);
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_year_month ON {{ this }} (year, month);
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_quarter ON {{ this }} (quarter);
+      
+      # Facts subfolder
+      facts:
+        +schema: facts
+        
+        # Fact: Purchase line items
+        fact_purchase_line_items:
+          +post-hook: |
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_purchase_item ON {{ this }} (purchase_key, item_key);
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_customer ON {{ this }} (customer_key);
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_item_key ON {{ this }} (item_key);
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_order_date ON {{ this }} (order_date);
+        
+        # Fact: Purchases
+        fact_purchases:
+          +post-hook: |
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_purchase_key ON {{ this }} (purchase_key);
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_customer ON {{ this }} (customer_key);
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_order_date ON {{ this }} (order_date);
+    
+    # Reports Layer (Platinum) - marts for easy analytics
+    reports:
+      +schema: marts
+      
+      # Customer reports subfolder
+      customer_reports:
+        # Customer Summary Mart
+        mart_customer_summary:
+          +post-hook: |
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_customer_key ON {{ this }} (customer_key);
+        
+        # Customer Monthly Metrics Mart
+        mart_customer_monthly_metrics:
+          +post-hook: |
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_customer_year_month ON {{ this }} (customer_key, year, month);
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_customer_key ON {{ this }} (customer_key);
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_year_month ON {{ this }} (year, month);
+        
+        # Customer Monthly Summary Mart
+        mart_customer_monthly_summary:
+          +post-hook: |
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_customer_year_month ON {{ this }} (customer_key, year, month);
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_customer_key ON {{ this }} (customer_key);
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_year_month ON {{ this }} (year, month);
+      
+      # Sales reports subfolder
+      sales_reports:
+        # Sales Summary Mart
+        mart_sales_summary:
+          +post-hook: |
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_purchase_item ON {{ this }} (purchase_key, item_key);
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_customer ON {{ this }} (customer_key);
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_order_date ON {{ this }} (order_date);
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_item_category ON {{ this }} (item_category);
+      
+      # Product reports subfolder
+      product_reports:
+        
+        # Product Baskets Mart
+        mart_product_baskets:
+          +post-hook: |
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_purchase_key ON {{ this }} (purchase_key);
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_customer_key ON {{ this }} (customer_key);
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_order_date ON {{ this }} (order_date);
+        
+        # Category Product Performance Mart
+        mart_category_product_performance:
+          +post-hook: |
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_category_item_year_month ON {{ this }} (item_category, item_key, year, month);
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_item_category ON {{ this }} (item_category);
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_item_key ON {{ this }} (item_key);
+            CREATE INDEX IF NOT EXISTS idx_{{ this.name }}_year_month ON {{ this }} (year, month);
+
+# Configuring seeds
+# Seeds will be loaded into the landing schema
+seeds:
+  retail_data_model:
+    +schema: landing
